@@ -288,7 +288,7 @@ fwd_result_t precondition_fwd_hook(twai_message_t *to_send, can_bus_t fwd_bus) {
     if (!precondition_requested 
             && status_frame_available 
             && !precondition_stop_confirmed 
-            && precondition_retries < PRECONDITION_MAX_RETRIES 
+            && precondition_retries < PRECONDITION_MAX_RETRIES
             && fwd_bus == CAR_BUS) {
         int64_t now = now_us();
         int64_t time_since_last_attempt = ts_elapsed(now, precondition_last_attempt_ts);
