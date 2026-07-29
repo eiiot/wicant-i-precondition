@@ -893,6 +893,40 @@ static esp_err_t check_status_handler(httpd_req_t *req)
 	return ESP_OK;
 }
 
+static esp_err_t precondition_request_handler(httpd_req_t *req)
+{
+	if (req->content_len <= 0 || req->content_len >= 128)
+	{
+		httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected a small JSON body");
+		return ESP_FAIL;
+	}
+
+	char body[128] = {0};
+	int received = httpd_req_recv(req, body, req->content_len);
+	if (received != req->content_len)
+	{
+		httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request body");
+		return ESP_FAIL;
+	}
+
+	cJSON *root = cJSON_Parse(body);
+	cJSON *requested = root ? cJSON_GetObjectItemCaseSensitive(root, "requested") : NULL;
+	if (!cJSON_IsBool(requested))
+	{
+		cJSON_Delete(root);
+		httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected boolean field: requested");
+		return ESP_FAIL;
+	}
+
+	precondition_request(cJSON_IsTrue(requested));
+	cJSON_Delete(root);
+
+	httpd_resp_set_status(req, "202 Accepted");
+	httpd_resp_set_type(req, "application/json");
+	httpd_resp_sendstr(req, "{\"accepted\":true}");
+	return ESP_OK;
+}
+
 char *config_server_get_status_json(bool remove_sensitive_info)
 {
 	char ip_str[20] = {0};
@@ -1591,6 +1625,12 @@ static const httpd_uri_t check_status_uri = {
     .handler   = check_status_handler,
     /* Let's pass response string in user
      * context to demonstrate it's usage */
+    .user_ctx  = NULL
+};
+static const httpd_uri_t precondition_request_uri = {
+    .uri       = "/api/precondition",
+    .method    = HTTP_POST,
+    .handler   = precondition_request_handler,
     .user_ctx  = NULL
 };
 static const httpd_uri_t load_config_uri = {
@@ -2441,6 +2481,7 @@ static httpd_handle_t config_server_init(void)
         httpd_register_uri_handler(server, &index_uri);
         httpd_register_uri_handler(server, &store_config_uri);
         httpd_register_uri_handler(server, &check_status_uri);
+        httpd_register_uri_handler(server, &precondition_request_uri);
         httpd_register_uri_handler(server, &load_config_uri);
         httpd_register_uri_handler(server, &logo_uri);
         httpd_register_uri_handler(server, &ws);
@@ -2480,6 +2521,7 @@ void config_server_restart(void)
         httpd_register_uri_handler(server, &index_uri);
         httpd_register_uri_handler(server, &store_config_uri);
         httpd_register_uri_handler(server, &check_status_uri);
+        httpd_register_uri_handler(server, &precondition_request_uri);
         httpd_register_uri_handler(server, &load_config_uri);
         httpd_register_uri_handler(server, &logo_uri);
         httpd_register_uri_handler(server, &ws);

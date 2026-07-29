@@ -6,6 +6,8 @@
 #include "can.h"
 #include "precondition.h"
 #include "config_server.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 #define TAG __func__
 
@@ -67,6 +69,7 @@ static int64_t activation_press_start_ts = 0U;
 static bool activation_long_press_fired = false;
 // is the status frame available? false if on unknown platform, true if we at any point receive a known status frame
 static bool status_frame_available = false;
+static QueueHandle_t precondition_request_queue = NULL;
 
 typedef enum {
     // frame carries the current button state: pressed while (byte & mask) == value
@@ -443,6 +446,16 @@ void precondition_can_rx_hook(twai_message_t *to_push, can_bus_t rx_bus) {
 void precondition_tick(void) {
     int64_t now = now_us();
     int64_t time_since_last_attempt = ts_elapsed(now, precondition_last_attempt_ts);
+    bool requested = false;
+
+    if (precondition_request_queue != NULL
+            && xQueueReceive(precondition_request_queue, &requested, 0) == pdTRUE) {
+        if (requested && !precondition_requested) {
+            start_preconditioning(now);
+        } else if (!requested && precondition_requested) {
+            stop_preconditioning(now);
+        }
+    }
 
     // long press mode: trigger once when the hold crosses the threshold, without
     // waiting for the release frame. state only becomes pressed via the rx hook,
@@ -510,5 +523,16 @@ void precondition_tick(void) {
     if (!precondition_requested && precondition_stop_ticks_remaining > 0U) {
         send_precondition_stop_msg(precondition_stop_ticks_remaining);
         precondition_stop_ticks_remaining--;
+    }
+}
+
+void precondition_request_init(void) {
+    precondition_request_queue = xQueueCreate(1, sizeof(bool));
+    configASSERT(precondition_request_queue != NULL);
+}
+
+void precondition_request(bool requested) {
+    if (precondition_request_queue != NULL) {
+        xQueueOverwrite(precondition_request_queue, &requested);
     }
 }
